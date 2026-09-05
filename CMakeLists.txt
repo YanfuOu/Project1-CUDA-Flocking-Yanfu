@@ -48,6 +48,8 @@ set(GLM_ROOT_DIR "${CMAKE_SOURCE_DIR}/external")
 find_package(GLM REQUIRED)
 include_directories(${GLM_INCLUDE_DIRS})
 
+# CUDA 13 ships CCCL (Thrust/CUB) with the toolkit; CMake needs this path.
+set(CCCL_DIR "/usr/local/cuda-13.2/lib64/cmake/cccl")
 find_package(CCCL REQUIRED)
 
 set(headers
