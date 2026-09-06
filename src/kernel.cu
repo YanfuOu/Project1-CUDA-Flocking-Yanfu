@@ -249,22 +249,47 @@ void Boids::copyBoidsToVBO(float *vbodptr_positions, float *vbodptr_velocities) 
 */
 __device__ glm::vec3 computeVelocityChange(int N, int iSelf, const glm::vec3 *pos, const glm::vec3 *vel) {
   // Rule 1: boids fly towards their local perceived center of mass, which excludes themselves
-  glm::vec3 perceived_center(0.0f, 0.0f, 0.0f); 
-  unsigned num_neighbors = 0; 
+  glm::vec3 perceived_center(0.0f, 0.0f, 0.0f); // Rule 1 - cohesion
+  glm::vec3 c(0.0f, 0.0f, 0.0f); // Rule 2 - seperation
+  glm::vec3 perceived_velocity(0.0f, 0.0f, 0.0f); // Rule 3 - alignment 
+  unsigned num_neighbors_r1 = 0; 
+  unsigned num_neighbors_r3 = 0;
   for(int i = 0; i < N; i++) {
-    if(i != iSelf && glm::distance(pos[i], pos[iSelf]) < rule1Distance) {
+    float dist = glm::distance(pos[i], pos[iSelf]);
+    if(i != iSelf && dist < rule1Distance) {
       perceived_center += pos[i]; 
-      num_neighbors++; 
+      num_neighbors_r1++; 
     }
+    // Rule 2: boids try to stay a distance d away from each other
+    if(i != iSelf && dist < rule2Distance) {
+      c -= pos[i] - pos[iSelf]; 
+    }
+    // Rule 3: boids try to match the speed of surrounding boids
+    if(i != iSelf && dist < rule3Distance) {
+      perceived_velocity += vel[i]; 
+      num_neighbors_r3++; 
+    }
+  
   }
-  // in the special case of isolated boids that has 0 neighbors, we want to prevent divide by 0 error 
-  if (num_neighbors == 0) {
-    return glm::vec3(0.0f); 
+  glm::vec3 dv(0.0f, 0.0f, 0.0f); // return delta velocity 
+
+  // Rule 1 
+  if (num_neighbors_r1 != 0) { // prevent divide by 0 error + if no neighbor --> no cohesion effect 
+    perceived_center /= (float)num_neighbors_r1; 
+    dv += (perceived_center - pos[iSelf]) * rule1Scale; 
   }
-  perceived_center /= (float)num_neighbors; 
-  return (perceived_center - pos[iSelf]) * rule1Scale; 
-  // Rule 2: boids try to stay a distance d away from each other
-  // Rule 3: boids try to match the speed of surrounding boids
+  // Rule 2
+  dv += c * rule2Scale; 
+
+  // Rule 3
+  if (num_neighbors_r3 != 0) { // prevent divide by 0 error + if no neighbor --> no alignment effect 
+    perceived_velocity /= (float)num_neighbors_r3; 
+    dv += perceived_velocity * rule3Scale; 
+  }
+
+  return dv; 
+
+ 
   // return glm::vec3(0.0f, 0.0f, 0.0f); // this is the default 
 }
 
