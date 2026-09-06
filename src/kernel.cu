@@ -177,7 +177,7 @@ void Boids::initSimulation(int N) {
   // LOOK-2.1 computing grid params
   gridCellWidth = 2.0f * std::max(std::max(rule1Distance, rule2Distance), rule3Distance);
   int halfSideCount = (int)(scene_scale / gridCellWidth) + 1;
-  gridSideCount = 2 * halfSideCount;
+  gridSideCount = 2 * halfSideCount; // aka Resolution
 
   gridCellCount = gridSideCount * gridSideCount * gridSideCount;
   gridInverseCellWidth = 1.0f / gridCellWidth;
@@ -187,6 +187,20 @@ void Boids::initSimulation(int N) {
   gridMinimum.z -= halfGridWidth;
 
   // TODO-2.1 TODO-2.3 - Allocate additional buffers here.
+  cudaMalloc((void**)&dev_particleArrayIndices, N * sizeof(int));
+  checkCUDAErrorWithLine("cudaMalloc dev_particleArrayIndices failed!");
+  cudaMalloc((void**)&dev_particleGridIndices, N * sizeof(int));
+  checkCUDAErrorWithLine("cudaMalloc dev_particleGridIndices failed!");
+
+  dev_thrust_particleArrayIndices = thrust::device_ptr<int>(dev_particleArrayIndices);
+  dev_thrust_particleGridIndices  = thrust::device_ptr<int>(dev_particleGridIndices);
+
+  cudaMalloc((void**)&dev_gridCellStartIndices, gridCellCount * sizeof(int));
+  checkCUDAErrorWithLine("cudaMalloc dev_gridCellStartIndices failed!");
+  cudaMalloc((void**)&dev_gridCellEndIndices, gridCellCount * sizeof(int));
+  checkCUDAErrorWithLine("cudaMalloc dev_gridCellEndIndices failed!");
+
+  
   cudaDeviceSynchronize();
 }
 
@@ -355,8 +369,19 @@ __global__ void kernComputeIndices(int N, int gridResolution,
   glm::vec3 *pos, int *indices, int *gridIndices) {
     // TODO-2.1
     // - Label each boid with the index of its grid cell.
-    // - Set up a parallel array of integer indices as pointers to the actual
-    //   boid data in pos and vel1/vel2
+    int idx = blockIdx.x * blockDim.x + threadIdx.x; 
+    if(idx < N) {
+      // compute which cell that boid position is in and store that info in gridIndices
+      int iX = std::floor((pos[idx].x - gridMin.x) * inverseCellWidth); 
+      int iY = std::floor((pos[idx].y - gridMin.y) * inverseCellWidth); 
+      int iZ = std::floor((pos[idx].z - gridMin.z) * inverseCellWidth); 
+      int index1D = gridIndex3Dto1D(iX, iY, iZ, gridResolution); // grid cell # 
+      gridIndices[idx] = index1D; // updates the dev_particleGridIndices array 
+      // - Set up a parallel array of integer indices as pointers to the actual
+      //   boid data in pos and vel1/vel2
+      indices[idx] = idx; 
+    }
+
 }
 
 // LOOK-2.1 Consider how this could be useful for indicating that a cell
@@ -373,7 +398,29 @@ __global__ void kernIdentifyCellStartEnd(int N, int *particleGridIndices,
   // TODO-2.1
   // Identify the start point of each cell in the gridIndices array.
   // This is basically a parallel unrolling of a loop that goes
-  // "this index doesn't match the one before it, must be a new cell!"
+  // "this index doesn't match the one before it, must be a new cell!"gridIndices
+  int idx = blockIdx.x * blockDim.x + threadIdx.x; 
+  if (idx < N) {
+    // Start type 1: beginning of an array. Edge case that could cause index out of bound error 
+    if(idx <= 0) {
+      gridCellStartIndices[particleGridIndices[idx]] = 0; 
+    }
+    // Start type 2: normal start
+    else if(particleGridIndices[idx-1] != particleGridIndices[idx]) {
+      gridCellStartIndices[particleGridIndices[idx]] = idx; 
+    }
+    // Start type 3: fake start, aka middle of the array - do nothing 
+
+    // End type 1: end of an array. Edge case that could cause index out of bound error 
+    if(idx == N-1) {
+      gridCellEndIndices[particleGridIndices[idx]] = N; 
+    }
+    // end type 2: normal end 
+    else if(particleGridIndices[idx+1] != particleGridIndices[idx]) {
+      gridCellEndIndices[particleGridIndices[idx]] = idx + 1; 
+    }
+    // if neither a start of an end , defaults to -1 
+  }
 }
 
 __global__ void kernUpdateVelNeighborSearchScattered(
@@ -429,10 +476,24 @@ void Boids::stepSimulationScatteredGrid(float dt) {
   // In Parallel:
   // - label each particle with its array index as well as its grid index.
   //   Use 2x width grids.
-  // - Unstable key sort using Thrust. A stable sort isn't necessary, but you
+  dim3 fullBlocksPerGrid((numObjects + blockSize - 1) / blockSize); 
+  kernComputeIndices<<<fullBlocksPerGrid, blockSize>>>(numObjects, 
+    gridSideCount, gridMinimum, gridInverseCellWidth,
+    dev_pos, dev_particleArrayIndices, dev_particleGridIndices); 
+  
+    // - Unstable key sort using Thrust. A stable sort isn't necessary, but you
   //   are welcome to do a performance comparison.
+  thrust::sort_by_key(dev_thrust_particleGridIndices, dev_thrust_particleGridIndices + numObjects, dev_thrust_particleArrayIndices); 
+  
   // - Naively unroll the loop for finding the start and end indices of each
   //   cell's data pointers in the array of boid indices
+
+  dim3 cellBlocks( (gridCellCount + blockSize -1) / blockSize ); 
+  kernResetIntBuffer<<<cellBlocks, blockSize>>>(gridCellCount, dev_gridCellStartIndices, -1); 
+  kernResetIntBuffer<<<cellBlocks, blockSize>>>(gridCellCount, dev_gridCellEndIndices, -1); 
+
+  kernIdentifyCellStartEnd<<<fullBlocksPerGrid, blockSize>>>(numObjects, 
+    dev_particleGridIndices, dev_gridCellStartIndices, dev_gridCellEndIndices);
   // - Perform velocity updates using neighbor search
   // - Update positions
   // - Ping-pong buffers as needed
@@ -462,6 +523,10 @@ void Boids::endSimulation() {
   cudaFree(dev_pos);
 
   // TODO-2.1 TODO-2.3 - Free any additional buffers here.
+  cudaFree(dev_particleGridIndices);
+  cudaFree(dev_particleArrayIndices);
+  cudaFree(dev_gridCellStartIndices);
+  cudaFree(dev_gridCellEndIndices); 
 }
 
 void Boids::unitTest() {
