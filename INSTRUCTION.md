@@ -228,12 +228,33 @@ homework, we will use the value/key sort built into **Thrust**. See
 
 Your uniform grid will probably look something like this in GPU memory:
 - `dev_particleArrayIndices` - buffer containing a pointer for each boid to its
-data in dev_pos and dev_vel1 and dev_vel2
+data in dev_pos and dev_vel1 and dev_vel2 
 - `dev_particleGridIndices` - buffer containing the grid index of each boid
 - `dev_gridCellStartIndices` - buffer containing a pointer for each cell to the
 beginning of its data in `dev_particleArrayIndices`
 - `dev_gridCellEndIndices` - buffer containing a pointer for each cell to the
 end of its data in `dev_particleArrayIndices`.
+
+## Yanfu's notes:
+### Before sorted:
+- dev_particleGridIndices is just an array of cells, where the index of the array represents the boid ID and the value at index i represents the cell the ith boid is in(dev_particleGridIndices[i] = cell number the ith boid is in).
+- dev_particleArrayIndices is also another array. Ex: dev_particleArrayIndices[i] = i; Index and value are both the boid ID (identity)
+
+### After sorted by dev_particleGridIndices's cell number :
+- dev_particleGridIndices's index is shared with dev_particleArrayIndices, and same grid cell ID are in contigous slots/indices. Index `i` is no longer a boid ID, it is a slot in the sorted list.
+- dev_particleGridIndices[i] = which cell the i-th index is in 
+- dev_particleArrayIndices[i] = boid id of the i-th index
+
+After sorting, the dev_gridCellStartIndices and dev_gridCellEndIndices can then be computed by looking at when dev_particleGridIndices's values changes. The beginning of the change is stored in dev_gridCellStartIndices and the end of the change is stored in dev_gridCellEndIndices. If no boids are in that cell, then -1 is stored. The index of dev_gridCellStartIndices  and dev_gridCellEndIndices represents cell ID. 
+- start[cell] = first slot where that cell ID shows up
+- end[cell] = first slot of the next cell (or N if it is last)
+
+### Lookup Model
+if I wanted to look up all the boids in cell 1 for an example, 
+1. I would go to index 1 of both dev_gridCellStartIndices and dev_gridCellEndIndices, and I would retrieve the start and end index for grid cell 1. 
+2. This can then be used to get all the boids from dev_particleArrayIndices[start] to dev_particleArrayIndices[end], excluding the end. The values of which represents the boid ID. 
+3. Using the boid ID, we can get the position and velocity using dev_pos[boid_id] and dev_vel1[boid_id] respectively. 
+---------------------------------------
 
 Here the term `pointer` when used with buffers is largely interchangeable with
 the term `index`, however, you will effectively be using array indices as
