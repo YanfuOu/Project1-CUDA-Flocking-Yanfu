@@ -31,6 +31,7 @@ I think this is due to hitting some sort of bottleneck or constraint unique to e
 | 50,000              | 60.8   | 1052.6                 | 2723.8        |
 | 100,000             | 15.9   | 539.5                  | 2210.8        |
 | 500,000             | 0.7    | 46.9                   | 336.9         |
+
 ![image](media/Num-Boids-vs-FPS-implementation.png)
 
 #### For each implementation, how does changing the block count and block size affect performance? Why do you think this is?
@@ -43,6 +44,7 @@ For the Scattered Uniform Grid and Coherent Grid implementation, there seems to 
 | 128        | 60.8   | 1052.6                 | 2723.8        |
 | 256        | 59.2   | 1105.9                 | 2770.7        |
 | 1024       | 54.4   | 1040.4                 | 2749.6        |
+
 ![image](media/Block-size-vs-FPS-implementations.png)
 #### For the coherent uniform grid: did you experience any performance improvements with the more coherent uniform grid? Was this the outcome you expected? Why or why not?
 The Coherent Uniform Grid provided fairly substantial improvement in FPS across all categories, including boid size, block size, and number of neighbors. This outcome is expected because coherent memory access is much faster than scattered memory access, and we would be able to take advantage of the GPU's caching mechanism.  
@@ -56,5 +58,6 @@ Naive is unchanged because it does not use the grid. For the grid methods, 27-ce
 | --------------------- | ----- | ------- | -------- |
 | 8                     | 60.7  | 1071.2  | 2734.5   |
 | 27                    | 61    | 527.5   | 1930.5   |
+
 ![image](media/num-neighbor-cell-vs-FPS-implementation.png)
 
